@@ -1,6 +1,8 @@
 from XGBoost import XGBoost
 from LSTM import LSTMForecastModel
 import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
 
 class blender:
     def __init__(self, data, train_ratio=0.8, val_ratio=0.1, test_ratio=0.1):
@@ -49,14 +51,14 @@ class blender:
         )
 
         # === Train XGBoost ===
-        self.xgb_model = XGBoostModel(data=self.base_train_data.reset_index())
+        self.xgb_model = XGBoost(data=self.base_train_data.reset_index())
         self.xgb_model.preprocess_data(resample_freq=xgb_freq, target_horizon=xgb_horizon)
         self.xgb_model.train_model()
         self.xgb_model.evaluate_model()
 
         # === XGBoost Predictions ===
-        # Create nwe model for holdout data
-        xgb_holdout_model = XGBoostModel(data=self.holdout_data.reset_index())
+        # Create new model for holdout data
+        xgb_holdout_model = XGBoost(data=self.holdout_data.reset_index())
         xgb_holdout_model.preprocess_data(resample_freq=xgb_freq, target_horizon=xgb_horizon)
         #reuse the trained model and scaler
         xgb_holdout_model.model = self.xgb_model.model
@@ -65,7 +67,7 @@ class blender:
         self.xgb_holdout = xgb_holdout_model.predict(data=xgb_holdout_model.df_clean)
 
         # Create new model for the test data
-        xgb_test_model = XGBoostModel(data=self.test_data.reset_index())
+        xgb_test_model = XGBoost(data=self.test_data.reset_index())
         xgb_test_model.preprocess_data(resample_freq=xgb_freq, target_horizon=xgb_horizon)
         xgb_test_model.model = self.xgb_model.model
         xgb_test_model.scaler = self.xgb_model.scaler

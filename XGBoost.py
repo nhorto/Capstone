@@ -7,7 +7,7 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from xgboost import XGBRegressor
 import seaborn as sns
 
-class XGBoostModel:
+class XGBoost:
     def __init__(self, data=None, file_path=None, direct_features=None):
         if data is not None:
             self.df = data.copy()
@@ -16,7 +16,7 @@ class XGBoostModel:
         else:
             raise ValueError("Provide either a DataFrame or file path")
 
-        # Allow user to specify which features to use directly
+        # This allows you to specify which features to use directly
         #self.direct_features = direct_features or ['WMS 01 irradiancee']
 
         self.scaler = MinMaxScaler()
@@ -126,23 +126,23 @@ class XGBoostModel:
         self.df['month_sin'] = np.sin(2 * np.pi * self.df['month'] / 12)
         self.df['month_cos'] = np.cos(2 * np.pi * self.df['month'] / 12)
 
-        # Step 0: Shift irradiance to simulate known-ahead forecast
+        # Shift irradiance to simulate known-ahead forecast
         self.df['irradiance_future'] = self.df['WMS 01 irradiance'].shift(-target_horizon)
 
-        # Step 1: Keep the original high-frequency target series
+        # Keep the original high-frequency target series
         original_target = self.df['total_output_power_kW'].copy()
         future_target = original_target.shift(-target_horizon)
         irradiance_future = self.df['irradiance_future']
 
-        # Step 2: Resample all numeric feature columns except the target
+        # Resample all numeric feature columns except the target
         df_features = self.df.drop(columns=['total_output_power_kW'])
         df_resampled = df_features.select_dtypes(include=[np.number]).resample(resample_freq).mean()
 
-        # Step 3: Resample future target and future irradiance to match resample frequency
-        df_resampled['power_future'] = future_target.resample(resample_freq).first()
-        df_resampled['irradiance_future'] = irradiance_future.resample(resample_freq).first()
+        # Resample future target and future irradiance to match resample frequency
+        df_resampled['power_future'] = future_target.resample(resample_freq).mean()
+        df_resampled['irradiance_future'] = irradiance_future.resample(resample_freq).mean()
 
-        # Step 4: Align everything using a common index
+        # Align everything using a common index
         common_idx = df_resampled.index.intersection(df_resampled['power_future'].dropna().index)
         df_resampled = df_resampled.loc[common_idx].copy()
         df_resampled['power_future'] = df_resampled['power_future'].loc[common_idx]
@@ -198,9 +198,6 @@ class XGBoostModel:
             df_resampled['irr_temp_interaction'] = df_resampled['WMS 01 irradiance'] * df_resampled['average_temperature_C']
             df_resampled['irr_time_interaction'] = df_resampled['WMS 01 irradiance'] * df_resampled['peak_sun_factor']
             self.features += ['irr_temp_interaction', 'irr_time_interaction']
-
-        # Create target (future power output)
-        #df_resampled['power_future'] = df_resampled['total_output_power_kW'].shift(-target_horizon)
 
         # Drop rows with NaN values
         self.df_clean = df_resampled.dropna()
@@ -300,6 +297,7 @@ class XGBoostModel:
         self.X_train_scaled = self.scaler.fit_transform(self.X_train)
         self.X_test_scaled = self.scaler.transform(self.X_test)
 
+        """ I used grid search at first to find the best hyperparameters then hardcoded them below for faster training """
         # # Default param grid if none provided
         # if param_grid is None:
         #     param_grid = {
@@ -558,7 +556,7 @@ class XGBoostModel:
         return {'rmse': rmse, 'mae': mae, 'r2': r2}
 
 
-    def run_pipeline(self, target_horizon=18, resample_freq='30T'):
+    def run_pipeline(self, target_horizon=18, resample_freq='30T', use_top_features=True, top_n=30):
         """Run the complete pipeline"""
         print("Step 1: Preprocessing data...")
         self.preprocess_data(target_horizon=target_horizon, resample_freq=resample_freq)
@@ -566,42 +564,31 @@ class XGBoostModel:
         print("\nStep 2: Analyzing features...")
         feature_corr = self.analyze_features()
 
-        print("\nstep 3: Get top features...")
-        model.train_model()
-        top_features = model.get_important_features(top_n=30)
+        # Optionally select top features or use all features
+        if use_top_features:
+            print(f"\nStep 3: Training initial model to get top {top_n} features...")
+            self.train_model()
+            top_features = self.get_important_features(top_n=top_n)
 
-        print("\nTop 30 Features Used: ")
-        for i, feat in enumerate(top_features, start=1):
-            print(f"{i}. {feat}")
+            print(f"\nTop {top_n} Features Used: ")
+            for i, feat in enumerate(top_features, start=1):
+                print(f"{i}. {feat}")
 
-        print("\nStep 3: Training model...")
-        feature_importance = self.train_model(selected_features = top_features)
+            print("\nStep 4: Retraining model with selected features...")
+            feature_importance = self.train_model(selected_features=top_features)
+        else:
+            print("\nStep 3: Training model with all features...")
+            feature_importance = self.train_model()
 
-        print("\nStep 4: Evaluating model...")
+        print("\nStep 5: Evaluating model...")
         train_metrics, test_metrics = self.evaluate_model()
 
-        print("\nStep 5: Plotting results...")
+        print("\nStep 6: Plotting results...")
         self.plot_results()
 
         return {
             'feature_correlation': feature_corr,
             'feature_importance': feature_importance,
-            'metrics': test_metrics
+            'train_metrics': train_metrics,
+            'test_metrics': test_metrics
         }
-
-# Usage example
-# if __name__ == "__main__":
-    # Example of how to use the model with solar irradiance as a direct feature
-
-    # Option 1: Using default direct features (solar_irradiance)
-    # model = ImprovedXGBoostModel(data=df.reset_index())
-    # results = model.run_pipeline()
-    # model.train_model()
-    # model.test_for_leakage()
-    # model.test_for_leakage()
-    # # Option 2: Specify custom direct features
-    # model = ImprovedXGBoostModel(
-    #     file_path="your_solar_data.csv",
-    #     direct_features=['solar_irradiance']
-    # )
-    # results = model.run_pipeline()

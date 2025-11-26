@@ -33,6 +33,12 @@ class LSTMForecastModel:
        'total_grid_connections','total_net_frequency_Hz'
         ]# is_daytime
 
+        # Direct features to use (matching XGBoost)
+        self.direct_features = ['WMS 01 irradiance','average_temperature_C', 'total_output_power_kW',
+            'total_last_active_fault', 'total_net_AC_voltage_V','total_time_run_today_h', 'average_average_cosphii_percent',
+       'total_DC_voltage_DCV', 'total_output_current_A',
+       'total_grid_connections','total_net_frequency_Hz']
+
         # Define what features to engineer and how
         self.feature_engineering_plan = {
             'total_output_power_kW': {
@@ -116,6 +122,9 @@ class LSTMForecastModel:
         self.df['month_sin'] = np.sin(2 * np.pi * self.df['month'] / 12)
         self.df['month_cos'] = np.cos(2 * np.pi * self.df['month'] / 12)
 
+        # Shift irradiance to simulate known-ahead forecast (matching XGBoost)
+        self.df['irradiance_future'] = self.df['WMS 01 irradiance'].shift(-target_horizon)
+
         # Original target
         original_power = self.df['total_output_power_kW'].copy()
 
@@ -128,12 +137,15 @@ class LSTMForecastModel:
 
         # Shift original target to create a future prediction target
         future_target = original_power.shift(-target_horizon)
-        df_resampled['power_future'] = future_target.resample(resample_freq).first()
+        irradiance_future = self.df['irradiance_future']
+        df_resampled['power_future'] = future_target.resample(resample_freq).mean()
+        df_resampled['irradiance_future'] = irradiance_future.resample(resample_freq).mean()
 
-        # Align future target to df_resampled
+        # Align future target and irradiance to df_resampled
         common_idx = df_resampled.index.intersection(future_target.index)
         df_resampled = df_resampled.loc[common_idx].copy()
         df_resampled['power_future'] = future_target.loc[common_idx]
+        df_resampled['irradiance_future'] = df_resampled['irradiance_future'].loc[common_idx]
 
         # Feature engineering
         for col, ops in self.feature_engineering_plan.items():
@@ -168,6 +180,17 @@ class LSTMForecastModel:
                     feature_name = f'{col}_diff_{periods}'
                     df_resampled[feature_name] = df_resampled[col].diff(periods=periods)
                     self.features.append(feature_name)
+
+        # Create interaction features if solar irradiance is available (matching XGBoost)
+        if 'WMS 01 irradiance' in df_resampled.columns:
+            df_resampled['irr_temp_interaction'] = df_resampled['WMS 01 irradiance'] * df_resampled['average_temperature_C']
+            df_resampled['irr_time_interaction'] = df_resampled['WMS 01 irradiance'] * df_resampled['peak_sun_factor']
+            self.features += ['irr_temp_interaction', 'irr_time_interaction']
+
+        # Add direct features if they exist in the dataframe (matching XGBoost)
+        for feature in self.direct_features:
+            if feature in df_resampled.columns and feature not in self.features:
+                self.features.append(feature)
 
         self.df_clean = df_resampled.dropna()
 
@@ -313,6 +336,9 @@ class LSTMForecastModel:
         temp_df['month_sin'] = np.sin(2 * np.pi * temp_df['month'] / 12)
         temp_df['month_cos'] = np.cos(2 * np.pi * temp_df['month'] / 12)
 
+        # Shift irradiance to simulate known-ahead forecast (matching XGBoost)
+        temp_df['irradiance_future'] = temp_df['WMS 01 irradiance'].shift(-target_horizon)
+
         original_power = temp_df['total_output_power_kW'].copy()
 
         df_features = temp_df.drop(columns=['total_output_power_kW'])
@@ -321,11 +347,14 @@ class LSTMForecastModel:
         df_resampled['historical_power'] = original_power.resample(resample_freq).mean()
 
         future_target = original_power.shift(-target_horizon)
+        irradiance_future = temp_df['irradiance_future']
         df_resampled['power_future'] = future_target.resample(resample_freq).first()
+        df_resampled['irradiance_future'] = irradiance_future.resample(resample_freq).mean()
 
         common_idx = df_resampled.index.intersection(future_target.index)
         df_resampled = df_resampled.loc[common_idx].copy()
         df_resampled['power_future'] = future_target.loc[common_idx]
+        df_resampled['irradiance_future'] = df_resampled['irradiance_future'].loc[common_idx]
 
         for col, ops in self.feature_engineering_plan.items():
             if col not in df_resampled.columns:
@@ -356,6 +385,11 @@ class LSTMForecastModel:
                 for periods in ops['diff']:
                     feature_name = f'{col}_diff_{periods}'
                     df_resampled[feature_name] = df_resampled[col].diff(periods=periods)
+
+        # Create interaction features if solar irradiance is available (matching XGBoost)
+        if 'WMS 01 irradiance' in df_resampled.columns:
+            df_resampled['irr_temp_interaction'] = df_resampled['WMS 01 irradiance'] * df_resampled['average_temperature_C']
+            df_resampled['irr_time_interaction'] = df_resampled['WMS 01 irradiance'] * df_resampled['peak_sun_factor']
 
         df_resampled.dropna(inplace=True)
 
@@ -394,7 +428,3 @@ class LSTMForecastModel:
         self.plot_results()
         self.plot_training_history()
         return results
-
-# model = LSTMForecastModel(data=df)
-# results = model.run_pipeline()
-# results

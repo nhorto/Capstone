@@ -267,7 +267,7 @@ class SolarDataProcessor:
             # Interpolate any remaining missing values
             df_resampled[col] = df_resampled[col].interpolate(method='time', limit_direction='both')
 
-        # Final fill if needed (still NaNs after interpolation)
+        # Final fill if needed 
         df_resampled = df_resampled.ffill().bfill()
 
         # Summary
@@ -299,8 +299,4 @@ class SolarDataProcessor:
         self.merge_weather_data()
         self.resample_time_series(data=self.combined_df)
 
-        return self.combined_df  # Ensure you return the actual processed DataFrame
-
-# example usage
-# processor = SolarDataProcessor()
-# df = processor.process_data('/content/drive/MyDrive/Inv_2024-09-30.csv', '/content/drive/MyDrive/weather_2024-09-30.csv')
+        return self.combined_df 
