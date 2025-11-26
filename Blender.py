@@ -1,14 +1,8 @@
+from XGBoost import XGBoost
 from LSTM import LSTMForecastModel
-from XGBoost import XGBoostModel
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-from xgboost import XGBRegressor
-from sklearn.linear_model import Ridge
-from sklearn.linear_model import RidgeCV
-from sklearn.preprocessing import StandardScaler
-class Blender:
+
+class blender:
     def __init__(self, data, train_ratio=0.8, val_ratio=0.1, test_ratio=0.1):
         self.data = data
         self.train_ratio = train_ratio
@@ -21,9 +15,16 @@ class Blender:
         train_end = int(self.train_ratio * total_len)
         val_end = train_end + int(self.val_ratio * total_len)
 
-        self.base_train_data = self.data.iloc[:train_end]
-        self.holdout_data = self.data.iloc[train_end:val_end]
-        self.test_data = self.data.iloc[val_end:]
+        # Use .iloc for positional slicing but reset_index to preserve datetime info
+        self.base_train_data = self.data.iloc[:train_end].reset_index()
+        self.holdout_data = self.data.iloc[train_end:val_end].reset_index()
+        self.test_data = self.data.iloc[val_end:].reset_index()
+        
+        # If the original data had a datetime index, rename it appropriately
+        if isinstance(self.data.index, pd.DatetimeIndex):
+            self.base_train_data = self.base_train_data.rename(columns={'index': 'datetime'})
+            self.holdout_data = self.holdout_data.rename(columns={'index': 'datetime'})
+            self.test_data = self.test_data.rename(columns={'index': 'datetime'})
 
     def run_models(self, lstm_freq='60min', xgb_freq='1H', lstm_horizon=18, xgb_horizon=18):
         # === Train LSTM ===

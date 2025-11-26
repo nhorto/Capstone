@@ -2,6 +2,8 @@ import pandas as pd
 import numpy as np
 
 class SolarDataProcessor:
+    import pandas as pd
+    import numpy as np
     """
     A class for processing and combining solar inverter data with weather data.
 
